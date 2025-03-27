@@ -1,0 +1,22 @@
+//
+
+syntax = "proto3";
+
+package usdt;
+
+option go_package = "gRPC-USDT/api;usdt";
+
+service RateService {
+  rpc GetRateFromExchange (GetRateFromExchangeRequest) returns (GetRateFromExchangeResponse);
+}
+
+message GetRateFromExchangeRequest {}
+
+message GetRateFromExchangeResponse {
+  bool success = 1; // Успех операции сохранения
+  float ask = 2;    // Цена ask
+  float bid = 3;    // Цена bid
+  float ask_amount = 4; // Объем по цене ask
+  float bid_amount = 5; // Объем по цене bid
+  string timestamp = 6; // Время получения курса
+}
