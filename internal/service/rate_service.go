@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,7 +22,7 @@ type HTTPClient interface {
 
 // RateStorage интерфейс для работы с хранилищем курсов
 type RateStorage interface {
-	SaveRate(ask, bid, askAmount, bidAmount float64, ts time.Time) error
+	SaveRate(ctx context.Context, ask, bid, askAmount, bidAmount float64, ts time.Time) error
 }
 
 // DefaultHTTPClient реализация HTTPClient по умолчанию
@@ -63,6 +64,10 @@ func (s *RateService) GetRateFromExchange(
 	ctx context.Context,
 	req *proto.GetRateFromExchangeRequest,
 ) (*proto.GetRateFromExchangeResponse, error) {
+	tr := otel.GetTracerProvider().Tracer("rate-service")
+	ctx, serviceSpan := tr.Start(ctx, "get-rate-from-exchange-service")
+	defer serviceSpan.End()
+
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", s.cfg.BinanceAPIURL, nil)
 	if err != nil {
 		s.logger.Error("Error creating request", zap.Error(err))
@@ -101,7 +106,7 @@ func (s *RateService) GetRateFromExchange(
 	}
 
 	timestamp := time.Now()
-	if err := s.storage.SaveRate(bestAsk, bestBid, askVolume, bidVolume, timestamp); err != nil {
+	if err := s.storage.SaveRate(ctx, bestAsk, bestBid, askVolume, bidVolume, timestamp); err != nil {
 		s.logger.Error("Error saving rate", zap.Error(err))
 		return nil, fmt.Errorf("save rate failed: %w", err)
 	}

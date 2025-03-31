@@ -8,6 +8,7 @@ import (
 	"gRPC-USDT/internal/config"
 	"gRPC-USDT/internal/service"
 	"gRPC-USDT/internal/storage"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -130,12 +131,17 @@ func PerformHealthCheck(logger *zap.Logger, cfg *config.Config) error {
 	return nil
 }
 
-func HandleSignals(logger *zap.Logger, grpcServer *grpc.Server) {
+func HandleSignals(logger *zap.Logger, grpcServer *grpc.Server, tp *tracesdk.TracerProvider) {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-signals
 	logger.Info("Received signal, shutting down gracefully...", zap.String("signal", sig.String()))
+
+	// Закрываем провайдер трассировки
+	if err := tp.Shutdown(context.Background()); err != nil {
+		logger.Error("Error shutting down tracer provider", zap.Error(err))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

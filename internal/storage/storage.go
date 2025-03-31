@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,11 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // DatabaseConnector представляет абстракцию для работы с базой данных
@@ -19,7 +25,7 @@ type DatabaseConnector interface {
 	Open(driverName, dataSourceName string) (*sql.DB, error)
 	Ping() error
 	Close() error
-	Exec(query string, args ...interface{}) (sql.Result, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
 // MigrateConnector представляет абстракцию для работы с миграциями
@@ -30,9 +36,9 @@ type MigrateConnector interface {
 
 // StorageInterface определяет контракт для работы с хранилищем
 type StorageInterface interface {
-	CreateDatabase(dbName string) error
+	CreateDatabase(ctx context.Context, dbName string) error
 	Migrate(migrationsPath string) error
-	SaveRate(ask, bid, askAmount, bidAmount float64, ts time.Time) error
+	SaveRate(ctx context.Context, ask, bid, askAmount, bidAmount float64, ts time.Time) error
 	Close() error
 }
 
@@ -66,11 +72,15 @@ func (d *DefaultDatabaseConnector) Close() error {
 	return d.db.Close()
 }
 
-func (d *DefaultDatabaseConnector) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (d *DefaultDatabaseConnector) ExecContext(
+	ctx context.Context,
+	query string,
+	args ...interface{},
+) (sql.Result, error) {
 	if d.db == nil {
 		return nil, errors.New("database not initialized")
 	}
-	return d.db.Exec(query, args...)
+	return d.db.ExecContext(ctx, query, args...)
 }
 
 // DefaultMigrateConnector - реализация MigrateConnector по умолчанию
@@ -121,16 +131,24 @@ func NewStorage(dsn string, dbConnector DatabaseConnector, migrateConnector Migr
 	}, nil
 }
 
-func (s *Storage) createDatabase(dbName string, tempDB DatabaseConnector) error {
+func (s *Storage) createDatabase(ctx context.Context, dbName string, tempDB DatabaseConnector) error {
+	tr := otel.GetTracerProvider().Tracer("storage-postgres")
+	ctx, span := tr.Start(ctx, "create-database")
+	defer span.End()
+
 	tempDSN := strings.ReplaceAll(s.dsn, fmt.Sprintf("/%s", dbName), "/postgres")
 
 	_, err := tempDB.Open("pgx", tempDSN)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "open temp database failed")
 		return fmt.Errorf("failed to open temp database: %w", err)
 	}
 	defer tempDB.Close()
 
 	if err = tempDB.Ping(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "ping temp database failed")
 		return fmt.Errorf("temp database ping failed: %w", err)
 	}
 
@@ -141,14 +159,21 @@ func (s *Storage) createDatabase(dbName string, tempDB DatabaseConnector) error 
         END IF;
     END $$;`, dbName, dbName)
 
-	_, err = tempDB.Exec(query)
+	_, err = tempDB.ExecContext(ctx, query)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "create database failed")
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 
 	log.Printf("Database %s created successfully\n", dbName)
 
 	return nil
+}
+
+func (s *Storage) CreateDatabase(ctx context.Context, dbName string) error {
+	tempDB := &DefaultDatabaseConnector{}
+	return s.createDatabase(ctx, dbName, tempDB)
 }
 
 func (s *Storage) Migrate(migrationsPath string) error {
@@ -175,14 +200,35 @@ func (s *Storage) Migrate(migrationsPath string) error {
 	return nil
 }
 
-func (s *Storage) SaveRate(ask, bid, askAmount, bidAmount float64, ts time.Time) error {
+func (s *Storage) SaveRate(
+	ctx context.Context,
+	ask, bid, askAmount, bidAmount float64,
+	ts time.Time,
+) error {
 	const query = `INSERT INTO rates(ask, bid, ask_amount, bid_amount, timestamp)
                    VALUES($1, $2, $3, $4, $5)`
 
-	_, err := s.db.Exec(query, ask, bid, askAmount, bidAmount, ts)
+	tr := otel.GetTracerProvider().Tracer("storage-postgres")
+	ctx, span := tr.Start(ctx, "SaveRate",
+		trace.WithAttributes(
+			semconv.DBSystemPostgreSQL,
+			attribute.String("db.operation", "INSERT"),
+			attribute.String("db.statement", query),
+		))
+	defer span.End()
+
+	_, err := s.db.ExecContext(ctx, query, ask, bid, askAmount, bidAmount, ts)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "save rate failed")
 		return fmt.Errorf("save rate failed: %w", err)
 	}
+
+	span.SetAttributes(
+		attribute.Float64("ask", ask),
+		attribute.Float64("bid", bid),
+		attribute.String("timestamp", ts.Format(time.RFC3339)),
+	)
 
 	return nil
 }
