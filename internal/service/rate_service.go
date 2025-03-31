@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gRPC-USDT/internal/metrics"
 	"go.opentelemetry.io/otel"
 	"net/http"
 	"strconv"
@@ -64,6 +65,8 @@ func (s *RateService) GetRateFromExchange(
 	ctx context.Context,
 	req *proto.GetRateFromExchangeRequest,
 ) (*proto.GetRateFromExchangeResponse, error) {
+	start := time.Now()
+
 	tr := otel.GetTracerProvider().Tracer("rate-service")
 	ctx, serviceSpan := tr.Start(ctx, "get-rate-from-exchange-service")
 	defer serviceSpan.End()
@@ -111,6 +114,9 @@ func (s *RateService) GetRateFromExchange(
 		return nil, fmt.Errorf("save rate failed: %w", err)
 	}
 	s.logger.Info("Rate saved successfully")
+
+	metrics.RateExchangeCalls.WithLabelValues("GetRateFromExchange").Inc()
+	metrics.RateExchangeLatency.WithLabelValues("GetRateFromExchange").Observe(time.Since(start).Seconds())
 
 	return &proto.GetRateFromExchangeResponse{
 		Success:   true,

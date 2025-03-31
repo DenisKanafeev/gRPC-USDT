@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"gRPC-USDT/internal/metrics"
 	"log"
 	"strings"
 	"time"
@@ -205,6 +206,8 @@ func (s *Storage) SaveRate(
 	ask, bid, askAmount, bidAmount float64,
 	ts time.Time,
 ) error {
+	start := time.Now()
+
 	const query = `INSERT INTO rates(ask, bid, ask_amount, bid_amount, timestamp)
                    VALUES($1, $2, $3, $4, $5)`
 
@@ -229,6 +232,9 @@ func (s *Storage) SaveRate(
 		attribute.Float64("bid", bid),
 		attribute.String("timestamp", ts.Format(time.RFC3339)),
 	)
+
+	metrics.DbSaves.Inc()
+	metrics.DbSaveLatency.Observe(time.Since(start).Seconds())
 
 	return nil
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"gRPC-USDT/internal/metrics"
 	"gRPC-USDT/internal/optel"
 	"gRPC-USDT/internal/utils"
+	"net/http"
 	"os"
 	"time"
 
@@ -61,6 +63,15 @@ func main() {
 	if err := utils.PerformHealthCheck(logger, cfg); err != nil {
 		logger.Fatal("Healthcheck failed", zap.Error(err))
 	}
+
+	// Экспозиция метрик Prometheus
+	go func() {
+		http.Handle("/metrics", metrics.ExposeMetrics())
+		logger.Info("Metrics endpoint started on port 2112")
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			logger.Error("Error starting metrics server", zap.Error(err))
+		}
+	}()
 
 	utils.HandleSignals(logger, grpcServer, tp)
 }
