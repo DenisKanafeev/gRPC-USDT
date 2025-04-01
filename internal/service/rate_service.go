@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"gRPC-USDT/internal/metrics"
-	"go.opentelemetry.io/otel"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"gRPC-USDT/api/proto"
 	"gRPC-USDT/internal/config"
 	"gRPC-USDT/internal/models"
+
 	"go.uber.org/zap"
 )
 
@@ -63,7 +66,7 @@ func NewRateService(
 // GetRateFromExchange получает курс от биржи и сохраняет его
 func (s *RateService) GetRateFromExchange(
 	ctx context.Context,
-	req *proto.GetRateFromExchangeRequest,
+	_ *proto.GetRateFromExchangeRequest,
 ) (*proto.GetRateFromExchangeResponse, error) {
 	start := time.Now()
 
@@ -82,7 +85,9 @@ func (s *RateService) GetRateFromExchange(
 		s.logger.Error("Error fetching rates", zap.Error(err))
 		return nil, fmt.Errorf("fetch rates failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("binance API returned status: %s", resp.Status)

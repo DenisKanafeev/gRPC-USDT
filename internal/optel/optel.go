@@ -1,26 +1,34 @@
 package optel
 
 import (
+	"context"
+	"fmt"
+
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
-	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 )
 
 // InitTracer инициализирует провайдер трассировки OpenTelemetry
-func InitTracer(url, serviceName string) (*tracesdk.TracerProvider, error) {
-	// Создаем Jaeger экспортер
-	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(url)))
+func InitTracer(otlpEndpoint, serviceName string) (*trace.TracerProvider, error) {
+	ctx := context.Background()
+
+	// Создаем OTLP экспортер
+	exp, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpoint(otlpEndpoint), // Используем WithEndpoint для хоста:порта
+		otlptracehttp.WithInsecure(),
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create exporter: %w", err)
 	}
 
-	tp := tracesdk.NewTracerProvider(
-		tracesdk.WithSampler(tracesdk.AlwaysSample()),
-		tracesdk.WithBatcher(exp),
-		tracesdk.WithResource(resource.NewWithAttributes(
+	tp := trace.NewTracerProvider(
+		trace.WithSampler(trace.AlwaysSample()),
+		trace.WithBatcher(exp),
+		trace.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String(serviceName),
 		)),

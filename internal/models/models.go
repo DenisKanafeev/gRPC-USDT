@@ -13,7 +13,7 @@ type Rate struct {
 }
 
 type BinanceDepthResponse struct {
-	LastUpdateId int64      `json:"lastUpdateId"`
+	LastUpdateID int64      `json:"lastUpdateId"`
 	Bids         [][]string `json:"bids"`
 	Asks         [][]string `json:"asks"`
 }

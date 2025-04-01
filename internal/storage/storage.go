@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" //Драйвер для миграций
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.opentelemetry.io/otel"
@@ -35,9 +35,8 @@ type MigrateConnector interface {
 	Up() error
 }
 
-// StorageInterface определяет контракт для работы с хранилищем
-type StorageInterface interface {
-	CreateDatabase(ctx context.Context, dbName string) error
+// Interface определяет контракт для работы с хранилищем
+type Interface interface {
 	Migrate(migrationsPath string) error
 	SaveRate(ctx context.Context, ask, bid, askAmount, bidAmount float64, ts time.Time) error
 	Close() error
@@ -49,6 +48,7 @@ type DefaultDatabaseConnector struct {
 }
 
 func (d *DefaultDatabaseConnector) Open(driverName, dataSourceName string) (*sql.DB, error) {
+	log.Println("Opening database with driver:", driverName, "and DSN:", dataSourceName)
 	if d.db == nil {
 		var err error
 		d.db, err = sql.Open(driverName, dataSourceName)
@@ -107,7 +107,7 @@ func (d *DefaultMigrateConnector) Up() error {
 	return d.m.Up()
 }
 
-// Storage реализует StorageInterface
+// Storage реализует Interface
 type Storage struct {
 	db               DatabaseConnector
 	migrateConnector MigrateConnector
@@ -116,6 +116,7 @@ type Storage struct {
 
 // NewStorage создает новое соединение с базой данных
 func NewStorage(dsn string, dbConnector DatabaseConnector, migrateConnector MigrateConnector) (*Storage, error) {
+	log.Println("Opening database with DSN:", dsn)
 	_, err := dbConnector.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -132,52 +133,9 @@ func NewStorage(dsn string, dbConnector DatabaseConnector, migrateConnector Migr
 	}, nil
 }
 
-func (s *Storage) createDatabase(ctx context.Context, dbName string, tempDB DatabaseConnector) error {
-	tr := otel.GetTracerProvider().Tracer("storage-postgres")
-	ctx, span := tr.Start(ctx, "create-database")
-	defer span.End()
-
-	tempDSN := strings.ReplaceAll(s.dsn, fmt.Sprintf("/%s", dbName), "/postgres")
-
-	_, err := tempDB.Open("pgx", tempDSN)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "open temp database failed")
-		return fmt.Errorf("failed to open temp database: %w", err)
-	}
-	defer tempDB.Close()
-
-	if err = tempDB.Ping(); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "ping temp database failed")
-		return fmt.Errorf("temp database ping failed: %w", err)
-	}
-
-	query := fmt.Sprintf(`DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '%s') THEN
-            CREATE DATABASE %s;
-        END IF;
-    END $$;`, dbName, dbName)
-
-	_, err = tempDB.ExecContext(ctx, query)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "create database failed")
-		return fmt.Errorf("failed to create database: %w", err)
-	}
-
-	log.Printf("Database %s created successfully\n", dbName)
-
-	return nil
-}
-
-func (s *Storage) CreateDatabase(ctx context.Context, dbName string) error {
-	tempDB := &DefaultDatabaseConnector{}
-	return s.createDatabase(ctx, dbName, tempDB)
-}
-
 func (s *Storage) Migrate(migrationsPath string) error {
+	log.Println("Migrations path:", migrationsPath)
+
 	if strings.TrimSpace(migrationsPath) == "" {
 		return errors.New("migrations path cannot be empty")
 	}
@@ -187,7 +145,8 @@ func (s *Storage) Migrate(migrationsPath string) error {
 	}
 
 	migrationDSN := strings.Split(s.dsn, "?")[0]
-	migrationDSN += "?x-migrations-table=schema_migrations"
+	migrationDSN += "?sslmode=disable&x-migrations-table=schema_migrations"
+	log.Println("Migration DSN:", migrationDSN)
 
 	_, err := s.migrateConnector.New("file://"+migrationsPath, migrationDSN)
 	if err != nil {
@@ -233,8 +192,8 @@ func (s *Storage) SaveRate(
 		attribute.String("timestamp", ts.Format(time.RFC3339)),
 	)
 
-	metrics.DbSaves.Inc()
-	metrics.DbSaveLatency.Observe(time.Since(start).Seconds())
+	metrics.DBSaves.Inc()
+	metrics.DBSaveLatency.Observe(time.Since(start).Seconds())
 
 	return nil
 }

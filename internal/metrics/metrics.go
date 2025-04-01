@@ -1,9 +1,10 @@
 package metrics
 
 import (
+	"net/http"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
 )
 
 // Метрики для сервиса
@@ -32,14 +33,14 @@ var (
 		},
 	)
 
-	DbSaves = prometheus.NewCounter(
+	DBSaves = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "db_saves_total",
 			Help: "Total number of successful saves to database",
 		},
 	)
 
-	DbSaveLatency = prometheus.NewHistogram(
+	DBSaveLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "db_save_latency_seconds",
 			Help:    "Latency of saving data to database",
@@ -52,11 +53,11 @@ func init() {
 	prometheus.MustRegister(RateExchangeCalls)
 	prometheus.MustRegister(RateExchangeLatency)
 	prometheus.MustRegister(binanceAPIRequests)
-	prometheus.MustRegister(DbSaves)
-	prometheus.MustRegister(DbSaveLatency)
+	prometheus.MustRegister(DBSaves)
+	prometheus.MustRegister(DBSaveLatency)
 }
 
-// Экспозиция метрик через HTTP
+// ExposeMetrics - экспозиция метрик через HTTP
 func ExposeMetrics() http.Handler {
 	return promhttp.Handler()
 }

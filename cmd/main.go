@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"gRPC-USDT/internal/metrics"
 	"gRPC-USDT/internal/optel"
 	"gRPC-USDT/internal/utils"
@@ -14,14 +15,27 @@ import (
 )
 
 func main() {
+
 	logger, err := utils.SetupLogger()
 	if err != nil {
 		panic(err)
 	}
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		_ = logger.Sync()
+	}(logger)
+
+	// Инициализация конфигурации
+	flagSet := flag.NewFlagSet("gRPC-USDT", flag.ContinueOnError)
+	err = flagSet.Parse(os.Args[1:])
+	if err != nil {
+		logger.Error("Error parsing flags", zap.Error(err))
+	}
+
+	// Загрузка конфигурации с учетом флагов
+	cfg := utils.LoadConfig(logger, flagSet)
 
 	// Инициализация трассировки
-	tp, err := optel.InitTracer("http://localhost:14268/api/traces", "usdt-service")
+	tp, err := optel.InitTracer(cfg.OTLPEndpoint, "usdt-service")
 	if err != nil {
 		logger.Fatal("Failed to initialize tracer", zap.Error(err))
 	} else {
@@ -36,13 +50,7 @@ func main() {
 		}
 	}()
 
-	flagSet := flag.NewFlagSet("gRPC-USDT", flag.ContinueOnError)
-	flagSet.Parse(os.Args[1:])
-
-	// Загрузка конфигурации с учетом флагов
-	cfg := utils.LoadConfig(logger, flagSet)
-
-	store, err := utils.CreateStorage(cfg, logger)
+	store, err := utils.CreateStorage(cfg)
 	if err != nil {
 		logger.Fatal("Error creating store", zap.Error(err))
 	}
@@ -67,8 +75,8 @@ func main() {
 	// Экспозиция метрик Prometheus
 	go func() {
 		http.Handle("/metrics", metrics.ExposeMetrics())
-		logger.Info("Metrics endpoint started on port 2112")
-		if err := http.ListenAndServe(":2112", nil); err != nil {
+		logger.Info("Metrics endpoint started on port", zap.Int("port", cfg.MetricsPort))
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.MetricsPort), nil); err != nil {
 			logger.Error("Error starting metrics server", zap.Error(err))
 		}
 	}()

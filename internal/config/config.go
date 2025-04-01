@@ -2,10 +2,11 @@ package config
 
 import (
 	"flag"
-	"github.com/joho/godotenv"
-	"go.uber.org/zap"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 type Config struct {
@@ -18,23 +19,27 @@ type Config struct {
 	MigrationsPath string
 	GRPCPort       int
 	BinanceAPIURL  string
+	MetricsPort    int
+	OTLPEndpoint   string
 }
 
 func LoadConfig(logger *zap.Logger, flags *flag.FlagSet) Config {
 	if err := godotenv.Load(); err != nil {
-		logger.Warn("No .env file found")
+		logger.Warn("No .env.docker.local.docker.local.docker.local file found")
 	}
 
 	cfg := Config{
-		Env:            getValue(logger, flags, "env", "ENV", "local"),
-		DBUser:         getValue(logger, flags, "db-user", "DB_USER", ""),
-		DBPassword:     getValue(logger, flags, "db-password", "DB_PASSWORD", ""),
-		DBHost:         getValue(logger, flags, "db-host", "DB_HOST", "localhost"),
-		DBPort:         getIntValue(logger, flags, "db-port", "DB_PORT", 5432),
-		DBName:         getValue(logger, flags, "db-name", "DB_NAME", ""),
-		MigrationsPath: getValue(logger, flags, "migrations-path", "MIGRATIONS_PATH", "../internal/storage/migrations"),
-		GRPCPort:       getIntValue(logger, flags, "grpc-port", "GRPC_PORT", 50051),
-		BinanceAPIURL:  getValue(logger, flags, "binance-api-url", "BINANCE_API_URL", ""),
+		Env:            getValue(flags, "env", "ENV", "local"),
+		DBUser:         getValue(flags, "db-user", "DB_USER", ""),
+		DBPassword:     getValue(flags, "db-password", "DB_PASSWORD", ""),
+		DBHost:         getValue(flags, "db-host", "DB_HOST", "localhost"),
+		DBPort:         getIntValue(flags, "db-port", "DB_PORT", 5432),
+		DBName:         getValue(flags, "db-name", "DB_NAME", ""),
+		MigrationsPath: getValue(flags, "migrations-path", "MIGRATIONS_PATH", "../internal/storage/migrations"),
+		GRPCPort:       getIntValue(flags, "grpc-port", "GRPC_PORT", 50051),
+		BinanceAPIURL:  getValue(flags, "binance-api-url", "BINANCE_API_URL", ""),
+		MetricsPort:    getIntValue(flags, "metrics-port", "METRICS_PORT", 2112),
+		OTLPEndpoint:   getValue(flags, "otlp-endpoint", "OTLP_ENDPOINT", ""),
 	}
 
 	validateConfig(logger, cfg)
@@ -42,7 +47,7 @@ func LoadConfig(logger *zap.Logger, flags *flag.FlagSet) Config {
 	return cfg
 }
 
-func getValue(logger *zap.Logger, flags *flag.FlagSet, flagName, envName, defaultValue string) string {
+func getValue(flags *flag.FlagSet, flagName, envName, defaultValue string) string {
 	if value := os.Getenv(envName); value != "" {
 		return value
 	}
@@ -52,7 +57,7 @@ func getValue(logger *zap.Logger, flags *flag.FlagSet, flagName, envName, defaul
 	return defaultValue
 }
 
-func getIntValue(logger *zap.Logger, flags *flag.FlagSet, flagName, envName string, defaultValue int) int {
+func getIntValue(flags *flag.FlagSet, flagName, envName string, defaultValue int) int {
 	if value := os.Getenv(envName); value != "" {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
@@ -67,7 +72,7 @@ func getIntValue(logger *zap.Logger, flags *flag.FlagSet, flagName, envName stri
 }
 
 func validateConfig(logger *zap.Logger, cfg Config) {
-	if cfg.DBUser == "" || cfg.DBPassword == "" || cfg.DBName == "" || cfg.BinanceAPIURL == "" {
+	if cfg.DBUser == "" || cfg.DBPassword == "" || cfg.DBName == "" || cfg.BinanceAPIURL == "" || cfg.OTLPEndpoint == "" {
 		logger.Fatal("Missing required configuration parameters")
 	}
 }
@@ -81,5 +86,7 @@ func logConfig(logger *zap.Logger, cfg Config) {
 		zap.String("migrations_path", cfg.MigrationsPath),
 		zap.Int("grpc_port", cfg.GRPCPort),
 		zap.String("binance_url", cfg.BinanceAPIURL),
+		zap.Int("metrics_port", cfg.MetricsPort),
+		zap.String("otlp_endpoint", cfg.OTLPEndpoint),
 	)
 }

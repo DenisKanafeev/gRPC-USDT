@@ -8,31 +8,30 @@ import (
 	"gRPC-USDT/internal/config"
 	"gRPC-USDT/internal/service"
 	"gRPC-USDT/internal/storage"
+	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"syscall"
+	"time"
+
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/health/grpc_health_v1"
 	health "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
-	"net"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"syscall"
-	"time"
 )
 
 type HealthService struct{}
 
-func (s *HealthService) Check(ctx context.Context, req *health.HealthCheckRequest) (*health.HealthCheckResponse, error) {
+func (s *HealthService) Check(context.Context, *health.HealthCheckRequest) (*health.HealthCheckResponse, error) {
 	return &health.HealthCheckResponse{Status: health.HealthCheckResponse_SERVING}, nil
 }
 
-func (s *HealthService) Watch(req *health.HealthCheckRequest, stream health.Health_WatchServer) error {
+func (s *HealthService) Watch(*health.HealthCheckRequest, health.Health_WatchServer) error {
 	return status.Error(codes.Unimplemented, "unimplemented")
 }
 
@@ -45,7 +44,7 @@ func LoadConfig(logger *zap.Logger, flags *flag.FlagSet) *config.Config {
 	return &cfg
 }
 
-func CreateStorage(cfg *config.Config, logger *zap.Logger) (*storage.Storage, error) {
+func CreateStorage(cfg *config.Config) (*storage.Storage, error) {
 	dataSourceName := "postgres://" + cfg.DBUser + ":" + cfg.DBPassword + "@" + cfg.DBHost + ":" + strconv.Itoa(cfg.DBPort) + "/" + cfg.DBName + "?sslmode=disable"
 
 	dbConnector := &storage.DefaultDatabaseConnector{}
@@ -60,24 +59,23 @@ func CreateStorage(cfg *config.Config, logger *zap.Logger) (*storage.Storage, er
 }
 
 func ApplyMigrations(store *storage.Storage, cfg *config.Config, logger *zap.Logger) error {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return fmt.Errorf("error getting current file path")
+	migrationsPath := cfg.MigrationsPath
+
+	// Если путь абсолютный, используем его как есть
+	if filepath.IsAbs(migrationsPath) {
+		logger.Info("Using absolute migrations path", zap.String("path", migrationsPath))
+	} else {
+		// Если путь относительный, пытаемся найти его относительно текущей директории
+		// Это может быть полезно для локального запуска
+		currentDir, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		migrationsPath = filepath.Join(currentDir, migrationsPath)
+		logger.Info("Using relative migrations path", zap.String("path", migrationsPath))
 	}
 
-	// Получаем корневую директорию проекта
-	projectRoot := filepath.Dir(filepath.Dir(filepath.Dir(filename)))
-
-	// Формируем абсолютный путь к миграциям
-	migrationsPath := filepath.Join(projectRoot, cfg.MigrationsPath)
-
-	logger.Info("Migrations path", zap.String("path", migrationsPath))
-
-	if err := store.Migrate(migrationsPath); err != nil {
-		return err
-	}
-
-	return nil
+	return store.Migrate(migrationsPath)
 }
 
 func CreateRateService(store *storage.Storage, logger *zap.Logger, cfg *config.Config) proto.RateServiceServer {
@@ -87,7 +85,7 @@ func CreateRateService(store *storage.Storage, logger *zap.Logger, cfg *config.C
 func StartServer(logger *zap.Logger, cfg *config.Config, rateService proto.RateServiceServer) (*grpc.Server, net.Listener, error) {
 	grpcServer := grpc.NewServer()
 	proto.RegisterRateServiceServer(grpcServer, rateService)
-	grpc_health_v1.RegisterHealthServer(grpcServer, &HealthService{})
+	health.RegisterHealthServer(grpcServer, &HealthService{})
 
 	addr := fmt.Sprintf(":%d", cfg.GRPCPort)
 	lis, err := net.Listen("tcp", addr)
@@ -114,16 +112,18 @@ func PerformHealthCheck(logger *zap.Logger, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func(conn *grpc.ClientConn) {
+		_ = conn.Close()
+	}(conn)
 
-	healthClient := grpc_health_v1.NewHealthClient(conn)
-	req := &grpc_health_v1.HealthCheckRequest{}
+	healthClient := health.NewHealthClient(conn)
+	req := &health.HealthCheckRequest{}
 	resp, err := healthClient.Check(context.Background(), req)
 	if err != nil {
 		return err
 	}
 
-	if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+	if resp.Status != health.HealthCheckResponse_SERVING {
 		return fmt.Errorf("server is not serving")
 	}
 
