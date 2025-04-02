@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/fatih/color"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,7 @@ func main() {
 		logger.Fatal("Failed to initialize tracer", zap.Error(err))
 	} else {
 		logger.Info("Tracer initialized successfully")
+		color.Green("You can view traces at http://localhost:16686 (have to start Jaeger for that)")
 	}
 
 	defer func() {
@@ -76,6 +78,7 @@ func main() {
 	go func() {
 		http.Handle("/metrics", metrics.ExposeMetrics())
 		logger.Info("Metrics endpoint started on port", zap.Int("port", cfg.MetricsPort))
+		color.Green("You can view metrics at http://localhost:9091 (have to start Prometheus for that)")
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.MetricsPort), nil); err != nil {
 			logger.Error("Error starting metrics server", zap.Error(err))
 		}

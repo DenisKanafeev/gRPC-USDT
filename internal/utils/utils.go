@@ -153,7 +153,7 @@ func HandleSignals(logger *zap.Logger, grpcServer *grpc.Server, tp *tracesdk.Tra
 	select {
 	case <-ctx.Done():
 		logger.Warn("Shutdown timed out, forcing exit")
-	case <-time.After(10 * time.Second):
+	case <-time.After(3 * time.Second):
 		logger.Info("Server stopped gracefully")
 	}
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"gRPC-USDT/internal/metrics"
-	"log"
 	"strings"
 	"time"
 
@@ -48,7 +47,7 @@ type DefaultDatabaseConnector struct {
 }
 
 func (d *DefaultDatabaseConnector) Open(driverName, dataSourceName string) (*sql.DB, error) {
-	log.Println("Opening database with driver:", driverName, "and DSN:", dataSourceName)
+
 	if d.db == nil {
 		var err error
 		d.db, err = sql.Open(driverName, dataSourceName)
@@ -116,7 +115,7 @@ type Storage struct {
 
 // NewStorage создает новое соединение с базой данных
 func NewStorage(dsn string, dbConnector DatabaseConnector, migrateConnector MigrateConnector) (*Storage, error) {
-	log.Println("Opening database with DSN:", dsn)
+
 	_, err := dbConnector.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -134,7 +133,6 @@ func NewStorage(dsn string, dbConnector DatabaseConnector, migrateConnector Migr
 }
 
 func (s *Storage) Migrate(migrationsPath string) error {
-	log.Println("Migrations path:", migrationsPath)
 
 	if strings.TrimSpace(migrationsPath) == "" {
 		return errors.New("migrations path cannot be empty")
@@ -146,7 +144,6 @@ func (s *Storage) Migrate(migrationsPath string) error {
 
 	migrationDSN := strings.Split(s.dsn, "?")[0]
 	migrationDSN += "?sslmode=disable&x-migrations-table=schema_migrations"
-	log.Println("Migration DSN:", migrationDSN)
 
 	_, err := s.migrateConnector.New("file://"+migrationsPath, migrationDSN)
 	if err != nil {
@@ -165,6 +162,10 @@ func (s *Storage) SaveRate(
 	ask, bid, askAmount, bidAmount float64,
 	ts time.Time,
 ) error {
+	if s.db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+
 	start := time.Now()
 
 	const query = `INSERT INTO rates(ask, bid, ask_amount, bid_amount, timestamp)

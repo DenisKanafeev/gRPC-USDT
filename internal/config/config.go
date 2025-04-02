@@ -25,7 +25,7 @@ type Config struct {
 
 func LoadConfig(logger *zap.Logger, flags *flag.FlagSet) Config {
 	if err := godotenv.Load(); err != nil {
-		logger.Warn("No .env.docker.local.docker.local.docker.local file found")
+		logger.Warn("No .env file found")
 	}
 
 	cfg := Config{
@@ -48,32 +48,57 @@ func LoadConfig(logger *zap.Logger, flags *flag.FlagSet) Config {
 }
 
 func getValue(flags *flag.FlagSet, flagName, envName, defaultValue string) string {
+	// 1. Проверяем флаг (только если он был явно установлен)
+	if flags != nil {
+		if f := flags.Lookup(flagName); f != nil {
+			// Если флаг был изменен (значение отличается от дефолтного)
+			if f.Value.String() != f.DefValue {
+				return f.Value.String()
+			}
+		}
+	}
+
+	// 2. Проверяем переменную окружения
 	if value := os.Getenv(envName); value != "" {
 		return value
 	}
-	if flags.Lookup(flagName) != nil {
-		return flags.Lookup(flagName).Value.String()
-	}
+
+	// 3. Возвращаем значение по умолчанию
 	return defaultValue
 }
 
 func getIntValue(flags *flag.FlagSet, flagName, envName string, defaultValue int) int {
+	// 1. Проверяем флаг (только если он был явно установлен)
+	if flags != nil {
+		if f := flags.Lookup(flagName); f != nil {
+			// Если флаг был изменен (значение отличается от дефолтного)
+			if f.Value.String() != f.DefValue {
+				if intVal, err := strconv.Atoi(f.Value.String()); err == nil {
+					return intVal
+				}
+			}
+		}
+	}
+
+	// 2. Проверяем переменную окружения
 	if value := os.Getenv(envName); value != "" {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
 		}
 	}
-	if flags.Lookup(flagName) != nil {
-		if intVal, err := strconv.Atoi(flags.Lookup(flagName).Value.String()); err == nil {
-			return intVal
-		}
-	}
+
+	// 3. Возвращаем значение по умолчанию
 	return defaultValue
 }
 
 func validateConfig(logger *zap.Logger, cfg Config) {
 	if cfg.DBUser == "" || cfg.DBPassword == "" || cfg.DBName == "" || cfg.BinanceAPIURL == "" || cfg.OTLPEndpoint == "" {
-		logger.Fatal("Missing required configuration parameters")
+		logger.Fatal("Missing required configuration parameters",
+			zap.String("DBUser", cfg.DBUser),
+			zap.String("DBName", cfg.DBName),
+			zap.String("BinanceAPIURL", cfg.BinanceAPIURL),
+			zap.String("OTLPEndpoint", cfg.OTLPEndpoint),
+		)
 	}
 }
 
